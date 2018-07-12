@@ -3,9 +3,9 @@
 This project searches the 10 most relevant images to the user input. Here, I have used Clarifai's predict API to extract the tags from an image alongwith it's confidence value. Stored this data in-memory data strucutre & applied search functionality on it.
 
 ### Dependencies
-Operating System used: Windows 10
-Go version: go version go1.9.2 windows/amd64
-Dependencies: GJSON library
+Operating System used: Windows 10  
+Go version: go version go1.9.2 windows/amd64  
+Dependencies: GJSON library  
 
 ### How to run the program :
 1. Install 'go1.9.2windows/amd64' version in your windows system
