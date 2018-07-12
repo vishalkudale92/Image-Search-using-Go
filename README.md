@@ -3,9 +3,9 @@
 `Problem Statement`: Tag images using Clarifai's API & storing it to in-memory data structure. To build a simple search engine interface for images using Golang.
 
 `Requirements`:
-**Operating System used**: Windows 10
-**Go version**: go version go1.9.2 windows/amd64
-**Dependencies**: GJSON library
+**Operating System used**: Windows 10  
+**Go version**: go version go1.9.2 windows/amd64  
+**Dependencies**: GJSON library  
 
 `How to run the Program`:
 1. Install 'go1.9.2windows/amd64' version of golang in your windows operating system.
