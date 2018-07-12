@@ -1,0 +1,246 @@
+package main
+
+import (
+    "fmt"
+    "net/http"
+	"bytes"
+	"io/ioutil"	
+	"github.com/tidwall/gjson" // GJSON is a Go package that provides a 	fast and simple way to get values from a json document.
+	"strings"
+	"log"
+	"bufio"
+	"os"
+	"strconv"
+)
+
+/* imageMap Declaration 
+Key : Imagenumber
+Value: URL of the image
+Description: imageMap is used to associate a unique number to each image.
+*/
+var imageMap map[int]string
+
+/* tagMap Declaration 
+Key : Tag
+Value: Array of imageWithProbability struct
+Description: tagMap is used to store the imageNumber(which maps to image in imageMap) with it's tag's confidence. Array is always in descending order based on confidence.
+*/
+var tagMap map[string][]imageWithProbability
+
+/* imageWithProbability Declaration 
+imageNumber DataField: Provides unique number for mapping imageurl 
+confidence DataField: Predicted confidence of image with associated tag
+*/
+type imageWithProbability struct{
+	imageNumber int
+	confidence float64
+}
+
+//Used for image-id in imageMap
+var imageIdentifier int = 0
+
+/*
+Author: Vishal Kudale
+Function name: getRequestBody()
+Description: Constructs http request body to get the tags for image from Clarifai's API call
+Parameters: URL of the image
+Returns: http request-body
+Modified dates: 6/18/2018
+*/
+func getRequestBody(ImageUrl string) string{
+	
+	var jsonString []string	
+	init := `{"inputs":[{"data":{"image":{"url":"`
+	end := `"}}}]}`
+	
+	jsonString = append(jsonString,init)
+	jsonString = append(jsonString,ImageUrl)
+	jsonString = append(jsonString,end)
+	return strings.Join(jsonString,"")	
+}	
+
+/*
+Author: Vishal Kudale
+Function name: formatResult()
+Description: Removes unwanted characters
+Parameters: list of tags/confidence, Integer value to differentiate between tag list & confidence list
+Returns: Array of tags/confidence
+Modified dates: 6/18/2018
+*/
+func formatResult(list gjson.Result, flag int) []string{
+	trimList :=strings.Trim(strings.Trim(list.String(),"["),"]")
+	if(flag==0){
+		trimListwithoutQuote :=strings.Replace(trimList,`"`,"",-1)	
+		return strings.Split(trimListwithoutQuote,",")
+	}
+	return strings.Split(trimList,",")
+}
+
+/*
+Author: Vishal Kudale
+Function name: getTags()
+Description: Get all tags for the given image-url from Clarifai's API
+Parameters:URL of the image
+Returns: Nil
+Modified dates: 6/18/2018
+*/
+func getTags(ImageUrl string){	
+
+	const url = "https://api.clarifai.com/v2/models/aaa03c23b3724a16a56b629203edc62c/outputs"
+
+	imageMap[imageIdentifier] = ImageUrl		
+	
+	var requestBody = []byte(getRequestBody(ImageUrl))
+    req, err := http.NewRequest("POST", url, bytes.NewBuffer(requestBody))
+    req.Header.Set("Authorization", "Key b38bdc7d789a4ad7be9042d4e755585b")
+    req.Header.Set("Content-Type", "application/json")
+
+    client := &http.Client{}
+    resp, err := client.Do(req)
+    if err != nil {
+        panic(err)
+    }
+    defer resp.Body.Close()
+
+    body, _ := ioutil.ReadAll(resp.Body)
+
+	listOfTags := gjson.Get(string(body), "outputs.#.data.concepts.#.name")	
+	
+	TagArray := formatResult(listOfTags,0)
+	
+	listOfConfidence := gjson.Get(string(body), "outputs.#.data.concepts.#.value")
+	
+	confidenceArray := formatResult(listOfConfidence,1)
+	
+	var index int = 0
+	
+	for _, tag := range TagArray {
+		confidenceFloat, _ := strconv.ParseFloat(confidenceArray[index], 64)
+		object := imageWithProbability{imageNumber :imageIdentifier, confidence:confidenceFloat}
+		
+		position := -1		
+        if val, ok := tagMap[tag]; ok {				
+				for i:=0;i< len(val);i++{
+					tuple := val[i]
+					if(tuple.confidence > object.confidence){
+						continue
+					}else{
+						position = i
+						break
+					}					
+				}
+				
+				if position == -1{
+					tagMap[tag] = append(val,object)
+				}else{			
+					var finalListofTags []imageWithProbability
+					finalListofTags = append(finalListofTags,val[:position]...)
+					finalListofTags = append(finalListofTags,object)
+					finalListofTags = append(finalListofTags,val[position:]...)
+					tagMap[tag] = finalListofTags
+				}				
+		}else{			
+			tagMap[tag] = []imageWithProbability{object}
+		}
+		index++
+    }
+	imageIdentifier++
+}
+
+/*
+Author: Vishal Kudale
+Function name: searchImages()
+Description: Searches all the images for tag given by the user
+Parameters: input tag from user
+Returns: List of all relevant images for the tag alongwith their confidence
+Modified dates: 6/20/2018
+*/
+func searchImages(tagFromUser string) []string{
+	var allImageUrls []string
+	if val, ok := tagMap[tagFromUser]; ok {
+		imageList := val
+		imageCount := 0
+		for i:=0;i< len(imageList);i++{
+			image_confidence := strings.Join([]string{imageMap[imageList[i].imageNumber],"(",strconv.FormatFloat(imageList[i].confidence, 'f', -1, 64),")"},"")
+			allImageUrls = append(allImageUrls,image_confidence)
+			if(imageCount == 9){
+				break
+			}
+			imageCount++
+		}				
+	}
+	return allImageUrls
+}
+
+/*
+Author: Vishal Kudale
+Function name: printStar()
+Description: Print line of star characters
+Parameters: Nil
+Returns: Nil
+Modified dates: 6/19/2018
+*/
+func printStar(){
+	fmt.Println("***********************************************************")
+}
+
+func main() {
+	imageMap = make(map[int]string)
+	tagMap = make(map[string][]imageWithProbability)
+
+	//This file io operations can be saved by replacing with either in-memory array or JSON file 
+    file, err := os.Open("images.txt")
+    if err != nil {
+		fmt.Println("Error opening the file")
+        log.Fatal(err)
+    }
+    defer file.Close()
+	
+	fi, err := file.Stat()
+	if fi.Size()==0 {
+	  fmt.Printf("The file is empty so unable to populate tags.")
+	  os.Exit(0)
+	}
+	
+	fmt.Println("Building up the database by getting tags from Clarifai's API for all images. It will take around 5-10 min.")
+    scanner := bufio.NewScanner(file)
+    for scanner.Scan() {
+	/*Predicting of the tags for each image is currently taking 5-10 min to process all 1000 images. This can be improved further by implemeting threading.*/
+		getTags(scanner.Text())
+    }
+    if err := scanner.Err(); err != nil {
+		fmt.Println("Error reading the file")
+        log.Fatal(err)
+    }
+	
+	condition := true; 
+	
+	for condition == true{		
+		reader := bufio.NewReader(os.Stdin)
+		fmt.Print("\nEnter tag to get relevant image list: ")
+		inputTag, _ := reader.ReadString('\n')
+		inputTag = strings.Trim(inputTag,"\n\r")
+
+		Result := searchImages(inputTag)
+		
+		if len(Result) > 0{
+			printStar()
+			fmt.Printf("List of probable images for tag %v sorted by confidence in descending order\n",inputTag)
+			printStar()
+			for i :=0;i<len(Result);i++{
+			fmt.Printf("( %v )",i+1)
+			fmt.Println(Result[i])
+			}
+		}else{
+			fmt.Println("No relevant image found for tag ",inputTag)
+		}		
+		fmt.Print("\nDo you want to continue(yes/no): ")
+		userChoice, _ := reader.ReadString('\n')
+		userChoice = strings.Trim(userChoice,"\n\r")
+		if strings.Compare(userChoice,"yes")==0 {
+			condition = true
+		}else{
+			condition = false
+		}
+	}
+}
